@@ -1,0 +1,21 @@
+Type: Compendium
+Package: Gender Positive
+Title: What the Package Does (One Line, Title Case)
+Version: 0.0.1
+Authors@R: 
+    person(given = "First",
+           family = "Last",
+           role = c("aut", "cre"),
+           email = "first.last@example.com",
+           comment = c(ORCID = "YOUR-ORCID-ID"))
+Description: A reply to BMJ 2019;367:l6573
+License: What license it uses
+Depends: 
+    broom,
+    janitor,
+    knitr,
+    rmarkdown,
+    stopwords,
+    tidyverse
+Encoding: UTF-8
+LazyData: true

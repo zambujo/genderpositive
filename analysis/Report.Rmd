@@ -1,0 +1,266 @@
+---
+title: "Reply to BMJ 2019;367:l6573"
+author: "João Martins, 01.2020"
+output:
+  tufte::tufte_html: default
+  tufte::tufte_handout: default
+editor_options: 
+  chunk_output_type: console
+---
+
+## Introduction
+
+[BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573) reports that female researchers in Life Sciences use fewer positive terms to describe the importance of their research than their male counterparts.  
+
+Can one reproduce those observations for grants funded by the Swiss National Science Foundation (SNSF)?
+
+## Analysis
+
+For a statistical analysis `R`, we use the following packages for convenience:
+
+```{r, message=FALSE}
+library(here)
+library(tidyverse)
+library(tidylog)
+library(janitor)
+library(stopwords)
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE)
+library(broom)
+```
+
+The SNSF provides a public datasets with information regarding the research domain, the titles, and the abstracts of the grants it funds, as well as the gender of the responsible grantee.
+
+To reproduce the analysis [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573), we will download two datasets available on the SNSF's grant portal at [p3.snf.ch](http://p3.snf.ch/Pages/DataAndDocumentation.aspx):
+
+```{r, eval=FALSE}
+
+download.file(
+  "http://p3.snf.ch/P3Export/P3_GrantExport_with_abstracts.csv",
+  here("data", "P3_GrantExport_with_abstracts.csv"))
+
+download.file(
+  "http://p3.snf.ch/P3Export/P3_PersonExport.csv",
+  here("data", "P3_PersonExport.csv"))
+```
+
+It's best to read the `.csv` files with the default column type set to `character`:
+
+```{r, message=FALSE, eval=FALSE}
+grants <- 
+  here("data", "P3_GrantExport_with_abstracts.csv") %>%
+  read_csv2(col_types = cols(.default = "c")) %>% 
+  clean_names()
+
+grantees <- 
+  here("data", "P3_PersonExport.csv") %>%
+  read_csv2(col_types = cols(.default = "c")) %>%
+  clean_names()
+```
+
+Let's cut the `grants` table to the few variables of interest: *title*, *abstract*, *domain*.
+
+```{r, eval=FALSE}
+grants <- grants %>%
+  select(
+    project_number, 
+    project_title, 
+    project_title_english,
+    abstract,
+    lay_summary_english,
+    discipline_name_hierarchy)
+```
+
+(As the SNSF accepts grants in several languages, we try to collect as many English abstracts and titles as possible.)  We also need to remove grants for which title and abstract are not available.
+
+```{r, eval=FALSE}
+grants <- grants %>%
+  mutate(
+    project_title = ifelse(
+      is.na(project_title_english), 
+      project_title,
+      project_title_english),
+    abstract = ifelse(
+      is.na(lay_summary_english), 
+      abstract,
+      lay_summary_english)) %>%
+  select(
+    -project_title_english, 
+    -lay_summary_english) %>%
+  drop_na()
+```
+
+We combine the title and the abstract, remove punctuation, double spaces, and parse the text as lists of words.
+
+```{r, eval=FALSE}
+grants <- grants %>%
+  unite("text", c("project_title", "abstract"), sep = " ") %>%
+  mutate(
+    text = str_replace_all(text, "[[:punct:]]", " "),
+    text = str_to_lower(text),
+    text = str_squish(text),
+    text = str_split(text, " "))
+```
+
+To further tidy the data-set, we separate the column *discipline_name_hierarchy* into *domain* and *subdomain*:
+
+```{r, eval=FALSE}
+grants <- grants %>%
+  separate(
+    discipline_name_hierarchy, 
+    c("domain", "subdomain"), ";", fill = "right")
+```
+
+Finally, we count the use of stop-words for English, German, French, and Italian (heuristic for language detection), and keep the texts where English has the highest score:
+
+```{r, eval=FALSE}
+
+count_stopwords <- function(lang, w) {
+  sum(w %in% stopwords(lang))
+}
+
+detect_language <- function(words, babel = c("en", "de", "fr", "it")) {
+  max <- map_int(babel,count_stopwords, w = words) %>%
+    which.max()
+  pluck(babel, max)
+}
+
+grants <- grants %>% 
+  mutate(lang = map_chr(text, detect_language)) %>%
+  filter(lang == "en")
+```
+
+As for the grantees, we are interested in *gender* and assume only applicants and responsible applicants actually write the grant.
+
+```{r, eval=FALSE}
+grantees <- grantees %>%
+  select(person_id = person_id_snsf, 
+         gender,
+         projects_as_responsible_applicant, 
+         projects_as_applicant) %>%
+  drop_na()
+```
+
+We sort the grants according to whether grantees are all female, all male, or mixed.
+
+```{r, eval=FALSE}
+df_gender <- grantees %>%
+  select(person_id, gender)
+
+df_mapp <- grantees %>%
+  select(person_id, project_id = projects_as_responsible_applicant) %>%
+  mutate(project_id = str_split(project_id, ";")) %>%
+  unnest(project_id) %>%
+  semi_join(grants, by = c("project_id" = "project_number")) %>%
+  mutate(type = "main app")
+
+df_app <- grantees %>%
+  select(person_id, project_id = projects_as_applicant) %>%
+  mutate(project_id = str_split(project_id, ";")) %>%
+  unnest(project_id) %>%
+  semi_join(grants, by = c("project_id" = "project_number")) %>%
+  mutate(type = "app")
+
+df_app <- df_app %>%
+  bind_rows(df_mapp) %>%
+  left_join(df_gender, by = "person_id")
+
+gender_proj <- df_app %>%
+  group_by(project_id) %>%
+  summarise(share_female = round(sum(gender == "female") / n(), 1)) %>% 
+  ungroup()
+
+grants <- grants %>%
+  left_join(gender_proj, by = c("project_number" = "project_id")) %>%
+  drop_na() %>%
+  mutate(
+    type = "mixed",
+    type = ifelse(share_female == 0, "male", type),
+    type = ifelse(share_female == 1, "female", type))
+
+```
+
+For consistency with the method presented in [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573), we flag whether positive terms occur at least once:
+
+```{r eval=FALSE}
+contains_any <- function(w, terms)
+  any(terms %in% w)
+
+terms25 <- c( 
+  "novel", "unique", "promising", "favorable", "robust",
+  "excellent", "prominent", "supportive", "encouraging", "remarkable",
+  "innovative", "unprecedented", "bright", "enormous", "reassuring",
+  "creative", "assuring", "hopeful", "astonishing", "spectacular",
+  "amazing", "inventive", "phenomenal", "groundbreaking", "inspiring")
+
+grants <- grants %>% 
+  mutate(is_positive = map_lgl(text, contains_any, terms = terms25))
+
+grants %>%
+  mutate(
+    domain = factor(domain),
+    subdomain = factor(subdomain),
+    type = factor(type, c("male", "female"), c("M", "F")),
+    is_positive = factor(is_positive, c("FALSE", "TRUE"), c("N", "Y"))) %>%
+  select(is_positive, type, domain, subdomain, share_female) %>%
+  write_rds(here("data", "clean_counts.Rds"))
+```
+
+
+The we try to look for possible differences in counts by *gender*, *domain*, and *subdomain*. Below detailed shares (%):
+
+```{r}
+dataset <- read_rds(here("data", "clean_counts.Rds")) %>%
+  filter(!is.na(type))
+
+get_positive_share <- function(grouped_df, side_note) {
+  grouped_df %>%
+    summarise(
+      total  = n(),
+      n_pos = sum(is_positive == "Y")) %>%
+    mutate(share = round(100 * n_pos / total, 1)) %>%
+    kable(caption = side_note)
+}
+
+dataset %>%
+  group_by(domain) %>%
+    get_positive_share(side_note = "Percentage of applications for which title and abstract contain at least one positive term by domain.")
+
+dataset %>%
+  group_by(type) %>%
+  get_positive_share(side_note = "Percentage of applications for which title and abstract contain at least one positive term by gender of the grantee.")
+
+dataset %>%
+  group_by(domain, type) %>%
+  get_positive_share(
+    side_note = "Percentage of applications for which title and abstract contain at least one positive term by domain and gender of the grantee.")
+
+dataset %>%
+  group_by(subdomain, type) %>%
+  get_positive_share(
+    side_note = "Percentage of applications for which title and abstract contain at least one positive term by subdomain and gender of the grantee.")
+
+```
+
+Generalized linear models (with a logit link function for binary response data) can help checking the significance level of the observed differences:
+
+```{r}
+model_gender <- glm(is_positive ~ type, 
+                    dataset, family = "binomial")
+model_gender_domain <- glm(is_positive ~ type + domain, 
+                           dataset, family = "binomial")
+model_gender_subdomain <- glm(is_positive ~ type + subdomain, 
+                           dataset, family = "binomial")
+
+tidy(model_gender) %>% 
+  kable(caption = "GLM for gender.")
+tidy(model_gender_domain) %>% 
+  kable(caption = "GLM for gender and domain.")
+tidy(model_gender_subdomain) %>% 
+  kable(caption = "GLM for gender and subdomain.")
+```
+
+Discussion  
+
+* As expected, positive terms are more commonly used in grant writing than in paper writing.
+* Unlike in the [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573), *gender* appears to play no role in the use of positive terms in SNSF grant applications.  If we correct for factors such as *domain* or *subdomain*, then *gender* appears to shows no significant effect when fitting a generalized linear model with a logit link function.
