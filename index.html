@@ -274,7 +274,7 @@ if (window.hljs) {
 <div id="introduction" class="section level2">
 <h2>Introduction</h2>
 <p><a href="https://www.bmj.com/content/367/bmj.l6573">BMJ 2019;367:l6573</a> reports that female researchers in Life Sciences use fewer positive terms to describe the importance of their research than their male counterparts.</p>
-<p>Can one reproduce those observations for grants funded by the Swiss National Science Foundation (SNSF)?</p>
+<p>Below, we investigate whether those observations can be reproduced for grants funded by the Swiss National Science Foundation (SNSF), the leading public research funding organization in Switzerland.</p>
 </div>
 <div id="analysis" class="section level2">
 <h2>Analysis</h2>
@@ -314,7 +314,9 @@ grantees &lt;-
     project_title_english,
     abstract,
     lay_summary_english,
-    discipline_name_hierarchy)</code></pre>
+    discipline_name_hierarchy,
+    discipline_name,
+    start_date)</code></pre>
 <p>(As the SNSF accepts grants in several languages, we try to collect as many English abstracts and titles as possible.) We also need to remove grants for which title and abstract are not available.</p>
 <pre class="r"><code>grants &lt;- grants %&gt;%
   mutate(
@@ -343,7 +345,7 @@ grantees &lt;-
   separate(
     discipline_name_hierarchy, 
     c(&quot;domain&quot;, &quot;subdomain&quot;), &quot;;&quot;, fill = &quot;right&quot;)</code></pre>
-<p>Finally, we count the use of stop-words for English, German, French, and Italian (heuristic for language detection), and keep the texts where English has the highest score:</p>
+<p>We count the use of stop-words for English, German, French, and Italian (heuristic for language detection), and keep the texts where English has the highest score:</p>
 <pre class="r"><code>count_stopwords &lt;- function(lang, w) {
   sum(w %in% stopwords(lang))
 }
@@ -357,6 +359,12 @@ detect_language &lt;- function(words, babel = c(&quot;en&quot;, &quot;de&quot;, 
 grants &lt;- grants %&gt;% 
   mutate(lang = map_chr(text, detect_language)) %&gt;%
   filter(lang == &quot;en&quot;)</code></pre>
+<p>And we extract the year from the grant start date.</p>
+<pre class="r"><code>grants &lt;- grants %&gt;% 
+  extract(start_date, &quot;start_year&quot;, &quot;([[:digit:]]{4}$)&quot;) %&gt;%
+  mutate(
+    start_year = as.numeric(start_year),
+    start_year = cut(start_year, breaks = 5))</code></pre>
 <p>As for the grantees, we are interested in <em>gender</em> and assume only applicants and responsible applicants actually write the grant.</p>
 <pre class="r"><code>grantees &lt;- grantees %&gt;%
   select(person_id = person_id_snsf, 
@@ -372,32 +380,34 @@ df_mapp &lt;- grantees %&gt;%
   select(person_id, project_id = projects_as_responsible_applicant) %&gt;%
   mutate(project_id = str_split(project_id, &quot;;&quot;)) %&gt;%
   unnest(project_id) %&gt;%
-  semi_join(grants, by = c(&quot;project_id&quot; = &quot;project_number&quot;)) %&gt;%
-  mutate(type = &quot;main app&quot;)
+  semi_join(grants, by = c(&quot;project_id&quot; = &quot;project_number&quot;))
 
 df_app &lt;- grantees %&gt;%
   select(person_id, project_id = projects_as_applicant) %&gt;%
   mutate(project_id = str_split(project_id, &quot;;&quot;)) %&gt;%
   unnest(project_id) %&gt;%
-  semi_join(grants, by = c(&quot;project_id&quot; = &quot;project_number&quot;)) %&gt;%
-  mutate(type = &quot;app&quot;)
+  semi_join(grants, by = c(&quot;project_id&quot; = &quot;project_number&quot;))
 
 df_app &lt;- df_app %&gt;%
   bind_rows(df_mapp) %&gt;%
+  distinct(person_id, project_id) %&gt;%
   left_join(df_gender, by = &quot;person_id&quot;)
 
 gender_proj &lt;- df_app %&gt;%
   group_by(project_id) %&gt;%
-  summarise(share_female = round(sum(gender == &quot;female&quot;) / n(), 1)) %&gt;% 
-  ungroup()
+  summarise(
+    n_authors = n(),
+    share_women = sum(gender == &quot;female&quot;) / n_authors) %&gt;% 
+  ungroup() %&gt;%
+  mutate(share_women = round(share_women, 1))
 
 grants &lt;- grants %&gt;%
   left_join(gender_proj, by = c(&quot;project_number&quot; = &quot;project_id&quot;)) %&gt;%
   drop_na() %&gt;%
   mutate(
-    type = &quot;mixed&quot;,
-    type = ifelse(share_female == 0, &quot;male&quot;, type),
-    type = ifelse(share_female == 1, &quot;female&quot;, type))</code></pre>
+    gender = &quot;mixed&quot;,
+    gender = ifelse(share_women == 0, &quot;male&quot;, gender),
+    gender = ifelse(share_women == 1, &quot;female&quot;, gender))</code></pre>
 <p>For consistency with the method presented in <a href="https://www.bmj.com/content/367/bmj.l6573">BMJ 2019;367:l6573</a>, we flag whether positive terms occur at least once:</p>
 <pre class="r"><code>contains_any &lt;- function(w, terms)
   any(terms %in% w)
@@ -413,17 +423,31 @@ grants &lt;- grants %&gt;%
   mutate(is_positive = map_lgl(text, contains_any, terms = terms25))
 
 grants %&gt;%
+  count(start_year, gender) %&gt;%
+  kable()
+
+grants %&gt;%
+  filter(start_year != &quot;(1997,2002]&quot;) %&gt;% # 2 women only
   mutate(
-    domain = factor(domain),
+    start_year = fct_drop(start_year),
+    start_year = fct_rev(start_year),
+    domain = factor(
+              domain, 
+              c(&quot;Biology and Medicine&quot;,
+                &quot;Mathematics, Natural- and Engineering Sciences&quot;,
+                &quot;Humanities and Social Sciences&quot;),
+              c(&quot;LS&quot;, &quot;PE&quot;, &quot;SH&quot;)),
     subdomain = factor(subdomain),
-    type = factor(type, c(&quot;male&quot;, &quot;female&quot;), c(&quot;M&quot;, &quot;F&quot;)),
+    gender = factor(gender, c(&quot;male&quot;, &quot;female&quot;), c(&quot;M&quot;, &quot;F&quot;)),
     is_positive = factor(is_positive, c(&quot;FALSE&quot;, &quot;TRUE&quot;), c(&quot;N&quot;, &quot;Y&quot;))) %&gt;%
-  select(is_positive, type, domain, subdomain, share_female) %&gt;%
+  select(is_positive, gender, 
+         domain, subdomain, discipline_name, 
+         share_women, start_year) %&gt;%
   write_rds(here(&quot;data&quot;, &quot;clean_counts.Rds&quot;))</code></pre>
-<p>The we try to look for possible differences in counts by <em>gender</em>, <em>domain</em>, and <em>subdomain</em>. Below detailed shares (%):</p>
+<p>The we try to look for possible differences in counts by <em>gender</em>, <em>domain</em>, and <em>start year</em>. Below detailed shares (%):</p>
 <pre class="r"><code>dataset &lt;- read_rds(here(&quot;data&quot;, &quot;clean_counts.Rds&quot;)) %&gt;%
-  filter(!is.na(type))</code></pre>
-<pre><code>## filter: removed 1,656 rows (11%), 14,085 rows remaining</code></pre>
+  filter(!is.na(gender))</code></pre>
+<pre><code>## filter: removed 1,650 rows (11%), 13,943 rows remaining</code></pre>
 <pre class="r"><code>get_positive_share &lt;- function(grouped_df, side_note) {
   grouped_df %&gt;%
     summarise(
@@ -452,29 +476,29 @@ dataset %&gt;%
 </thead>
 <tbody>
 <tr class="odd">
-<td align="left">Biology and Medicine</td>
-<td align="right">5332</td>
-<td align="right">2507</td>
-<td align="right">47.0</td>
+<td align="left">LS</td>
+<td align="right">5258</td>
+<td align="right">2488</td>
+<td align="right">47.3</td>
 </tr>
 <tr class="even">
-<td align="left">Humanities and Social Sciences</td>
-<td align="right">2641</td>
-<td align="right">708</td>
-<td align="right">26.8</td>
+<td align="left">PE</td>
+<td align="right">6080</td>
+<td align="right">2789</td>
+<td align="right">45.9</td>
 </tr>
 <tr class="odd">
-<td align="left">Mathematics, Natural- and Engineering Sciences</td>
-<td align="right">6112</td>
-<td align="right">2801</td>
-<td align="right">45.8</td>
+<td align="left">SH</td>
+<td align="right">2605</td>
+<td align="right">705</td>
+<td align="right">27.1</td>
 </tr>
 </tbody>
 </table>
 <pre class="r"><code>dataset %&gt;%
-  group_by(type) %&gt;%
+  group_by(gender) %&gt;%
   get_positive_share(side_note = &quot;Percentage of applications for which title and abstract contain at least one positive term by gender of the grantee.&quot;)</code></pre>
-<pre><code>## group_by: one grouping variable (type)</code></pre>
+<pre><code>## group_by: one grouping variable (gender)</code></pre>
 <pre><code>## summarise: now 2 rows and 3 columns, ungrouped</code></pre>
 <pre><code>## mutate: new variable 'share' with 2 unique values and 0% NA</code></pre>
 <p><!--
@@ -482,7 +506,7 @@ dataset %&gt;%
 <table>
 <thead>
 <tr class="header">
-<th align="left">type</th>
+<th align="left">gender</th>
 <th align="right">total</th>
 <th align="right">n_pos</th>
 <th align="right">share</th>
@@ -491,32 +515,31 @@ dataset %&gt;%
 <tbody>
 <tr class="odd">
 <td align="left">M</td>
-<td align="right">12152</td>
-<td align="right">5259</td>
-<td align="right">43.3</td>
+<td align="right">12012</td>
+<td align="right">5225</td>
+<td align="right">43.5</td>
 </tr>
 <tr class="even">
 <td align="left">F</td>
-<td align="right">1933</td>
+<td align="right">1931</td>
 <td align="right">757</td>
 <td align="right">39.2</td>
 </tr>
 </tbody>
 </table>
 <pre class="r"><code>dataset %&gt;%
-  group_by(domain, type) %&gt;%
-  get_positive_share(
-    side_note = &quot;Percentage of applications for which title and abstract contain at least one positive term by domain and gender of the grantee.&quot;)</code></pre>
-<pre><code>## group_by: 2 grouping variables (domain, type)</code></pre>
-<pre><code>## summarise: now 6 rows and 4 columns, one group variable remaining (domain)</code></pre>
-<pre><code>## mutate (grouped): new variable 'share' with 6 unique values and 0% NA</code></pre>
+  group_by(start_year, gender) %&gt;%
+  get_positive_share(side_note = &quot;Percentage of applications for which title and abstract contain at least one positive term by start year of the grant and by gender of the grantee.&quot;)</code></pre>
+<pre><code>## group_by: 2 grouping variables (start_year, gender)</code></pre>
+<pre><code>## summarise: now 8 rows and 4 columns, one group variable remaining (start_year)</code></pre>
+<pre><code>## mutate (grouped): new variable 'share' with 8 unique values and 0% NA</code></pre>
 <p><!--
-<caption>--><span class="marginnote shownote">Percentage of applications for which title and abstract contain at least one positive term by domain and gender of the grantee.</span><!--</caption>--></p>
+<caption>--><span class="marginnote shownote">Percentage of applications for which title and abstract contain at least one positive term by start year of the grant and by gender of the grantee.</span><!--</caption>--></p>
 <table>
 <thead>
 <tr class="header">
-<th align="left">domain</th>
-<th align="left">type</th>
+<th align="left">start_year</th>
+<th align="left">gender</th>
 <th align="right">total</th>
 <th align="right">n_pos</th>
 <th align="right">share</th>
@@ -524,63 +547,142 @@ dataset %&gt;%
 </thead>
 <tbody>
 <tr class="odd">
-<td align="left">Biology and Medicine</td>
+<td align="left">(2015,2020]</td>
 <td align="left">M</td>
-<td align="right">4518</td>
-<td align="right">2127</td>
-<td align="right">47.1</td>
+<td align="right">2797</td>
+<td align="right">1447</td>
+<td align="right">51.7</td>
 </tr>
 <tr class="even">
-<td align="left">Biology and Medicine</td>
+<td align="left">(2015,2020]</td>
 <td align="left">F</td>
-<td align="right">814</td>
+<td align="right">639</td>
+<td align="right">295</td>
+<td align="right">46.2</td>
+</tr>
+<tr class="odd">
+<td align="left">(2011,2015]</td>
+<td align="left">M</td>
+<td align="right">4691</td>
+<td align="right">2124</td>
+<td align="right">45.3</td>
+</tr>
+<tr class="even">
+<td align="left">(2011,2015]</td>
+<td align="left">F</td>
+<td align="right">728</td>
+<td align="right">271</td>
+<td align="right">37.2</td>
+</tr>
+<tr class="odd">
+<td align="left">(2006,2011]</td>
+<td align="left">M</td>
+<td align="right">3192</td>
+<td align="right">1192</td>
+<td align="right">37.3</td>
+</tr>
+<tr class="even">
+<td align="left">(2006,2011]</td>
+<td align="left">F</td>
+<td align="right">385</td>
+<td align="right">131</td>
+<td align="right">34.0</td>
+</tr>
+<tr class="odd">
+<td align="left">(2002,2006]</td>
+<td align="left">M</td>
+<td align="right">1332</td>
+<td align="right">462</td>
+<td align="right">34.7</td>
+</tr>
+<tr class="even">
+<td align="left">(2002,2006]</td>
+<td align="left">F</td>
+<td align="right">179</td>
+<td align="right">60</td>
+<td align="right">33.5</td>
+</tr>
+</tbody>
+</table>
+<pre class="r"><code>dataset %&gt;%
+  group_by(domain, gender) %&gt;%
+  get_positive_share(
+    side_note = &quot;Percentage of applications for which title and abstract contain at least one positive term by domain of the grant and by gender of the grantee.&quot;)</code></pre>
+<pre><code>## group_by: 2 grouping variables (domain, gender)</code></pre>
+<pre><code>## summarise: now 6 rows and 4 columns, one group variable remaining (domain)</code></pre>
+<pre><code>## mutate (grouped): new variable 'share' with 6 unique values and 0% NA</code></pre>
+<p><!--
+<caption>--><span class="marginnote shownote">Percentage of applications for which title and abstract contain at least one positive term by domain of the grant and by gender of the grantee.</span><!--</caption>--></p>
+<table>
+<thead>
+<tr class="header">
+<th align="left">domain</th>
+<th align="left">gender</th>
+<th align="right">total</th>
+<th align="right">n_pos</th>
+<th align="right">share</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">LS</td>
+<td align="left">M</td>
+<td align="right">4445</td>
+<td align="right">2108</td>
+<td align="right">47.4</td>
+</tr>
+<tr class="even">
+<td align="left">LS</td>
+<td align="left">F</td>
+<td align="right">813</td>
 <td align="right">380</td>
 <td align="right">46.7</td>
 </tr>
 <tr class="odd">
-<td align="left">Humanities and Social Sciences</td>
+<td align="left">PE</td>
 <td align="left">M</td>
-<td align="right">2029</td>
-<td align="right">559</td>
-<td align="right">27.6</td>
+<td align="right">5573</td>
+<td align="right">2561</td>
+<td align="right">46.0</td>
 </tr>
 <tr class="even">
-<td align="left">Humanities and Social Sciences</td>
-<td align="left">F</td>
-<td align="right">612</td>
-<td align="right">149</td>
-<td align="right">24.3</td>
-</tr>
-<tr class="odd">
-<td align="left">Mathematics, Natural- and Engineering Sciences</td>
-<td align="left">M</td>
-<td align="right">5605</td>
-<td align="right">2573</td>
-<td align="right">45.9</td>
-</tr>
-<tr class="even">
-<td align="left">Mathematics, Natural- and Engineering Sciences</td>
+<td align="left">PE</td>
 <td align="left">F</td>
 <td align="right">507</td>
 <td align="right">228</td>
 <td align="right">45.0</td>
 </tr>
+<tr class="odd">
+<td align="left">SH</td>
+<td align="left">M</td>
+<td align="right">1994</td>
+<td align="right">556</td>
+<td align="right">27.9</td>
+</tr>
+<tr class="even">
+<td align="left">SH</td>
+<td align="left">F</td>
+<td align="right">611</td>
+<td align="right">149</td>
+<td align="right">24.4</td>
+</tr>
 </tbody>
 </table>
 <pre class="r"><code>dataset %&gt;%
-  group_by(subdomain, type) %&gt;%
+  group_by(start_year, domain, gender) %&gt;%
   get_positive_share(
-    side_note = &quot;Percentage of applications for which title and abstract contain at least one positive term by subdomain and gender of the grantee.&quot;)</code></pre>
-<pre><code>## group_by: 2 grouping variables (subdomain, type)</code></pre>
-<pre><code>## summarise: now 38 rows and 4 columns, one group variable remaining (subdomain)</code></pre>
-<pre><code>## mutate (grouped): new variable 'share' with 37 unique values and 0% NA</code></pre>
+    side_note = &quot;Percentage of applications for which title and abstract contain at least one positive term by start year and domain of the grant and by gender of the grantee.&quot;)</code></pre>
+<pre><code>## group_by: 3 grouping variables (start_year, domain, gender)</code></pre>
+<pre><code>## summarise: now 24 rows and 5 columns, 2 group variables remaining (start_year, domain)</code></pre>
+<pre><code>## mutate (grouped): new variable 'share' with 24 unique values and 0% NA</code></pre>
 <p><!--
-<caption>--><span class="marginnote shownote">Percentage of applications for which title and abstract contain at least one positive term by subdomain and gender of the grantee.</span><!--</caption>--></p>
+<caption>--><span class="marginnote shownote">Percentage of applications for which title and abstract contain at least one positive term by start year and domain of the grant and by gender of the grantee.</span><!--</caption>--></p>
 <table>
 <thead>
 <tr class="header">
-<th align="left">subdomain</th>
-<th align="left">type</th>
+<th align="left">start_year</th>
+<th align="left">domain</th>
+<th align="left">gender</th>
 <th align="right">total</th>
 <th align="right">n_pos</th>
 <th align="right">share</th>
@@ -588,285 +690,213 @@ dataset %&gt;%
 </thead>
 <tbody>
 <tr class="odd">
-<td align="left">Art studies, musicology, theatre and film studies, architecture</td>
+<td align="left">(2015,2020]</td>
+<td align="left">LS</td>
 <td align="left">M</td>
-<td align="right">129</td>
-<td align="right">33</td>
-<td align="right">25.6</td>
+<td align="right">1080</td>
+<td align="right">618</td>
+<td align="right">57.2</td>
 </tr>
 <tr class="even">
-<td align="left">Art studies, musicology, theatre and film studies, architecture</td>
+<td align="left">(2015,2020]</td>
+<td align="left">LS</td>
 <td align="left">F</td>
-<td align="right">39</td>
-<td align="right">13</td>
-<td align="right">33.3</td>
+<td align="right">269</td>
+<td align="right">146</td>
+<td align="right">54.3</td>
 </tr>
 <tr class="odd">
-<td align="left">Basic Biological Research</td>
+<td align="left">(2015,2020]</td>
+<td align="left">PE</td>
 <td align="left">M</td>
-<td align="right">1498</td>
-<td align="right">739</td>
-<td align="right">49.3</td>
+<td align="right">1177</td>
+<td align="right">647</td>
+<td align="right">55.0</td>
 </tr>
 <tr class="even">
-<td align="left">Basic Biological Research</td>
+<td align="left">(2015,2020]</td>
+<td align="left">PE</td>
 <td align="left">F</td>
-<td align="right">277</td>
-<td align="right">115</td>
-<td align="right">41.5</td>
-</tr>
-<tr class="odd">
-<td align="left">Basic Medical Sciences</td>
-<td align="left">M</td>
-<td align="right">917</td>
-<td align="right">429</td>
-<td align="right">46.8</td>
-</tr>
-<tr class="even">
-<td align="left">Basic Medical Sciences</td>
-<td align="left">F</td>
-<td align="right">159</td>
+<td align="right">166</td>
 <td align="right">89</td>
-<td align="right">56.0</td>
+<td align="right">53.6</td>
 </tr>
 <tr class="odd">
-<td align="left">Chemistry</td>
+<td align="left">(2015,2020]</td>
+<td align="left">SH</td>
 <td align="left">M</td>
-<td align="right">1005</td>
-<td align="right">482</td>
-<td align="right">48.0</td>
+<td align="right">540</td>
+<td align="right">182</td>
+<td align="right">33.7</td>
 </tr>
 <tr class="even">
-<td align="left">Chemistry</td>
+<td align="left">(2015,2020]</td>
+<td align="left">SH</td>
+<td align="left">F</td>
+<td align="right">204</td>
+<td align="right">60</td>
+<td align="right">29.4</td>
+</tr>
+<tr class="odd">
+<td align="left">(2011,2015]</td>
+<td align="left">LS</td>
+<td align="left">M</td>
+<td align="right">1593</td>
+<td align="right">800</td>
+<td align="right">50.2</td>
+</tr>
+<tr class="even">
+<td align="left">(2011,2015]</td>
+<td align="left">LS</td>
+<td align="left">F</td>
+<td align="right">258</td>
+<td align="right">124</td>
+<td align="right">48.1</td>
+</tr>
+<tr class="odd">
+<td align="left">(2011,2015]</td>
+<td align="left">PE</td>
+<td align="left">M</td>
+<td align="right">2262</td>
+<td align="right">1084</td>
+<td align="right">47.9</td>
+</tr>
+<tr class="even">
+<td align="left">(2011,2015]</td>
+<td align="left">PE</td>
+<td align="left">F</td>
+<td align="right">198</td>
+<td align="right">90</td>
+<td align="right">45.5</td>
+</tr>
+<tr class="odd">
+<td align="left">(2011,2015]</td>
+<td align="left">SH</td>
+<td align="left">M</td>
+<td align="right">836</td>
+<td align="right">240</td>
+<td align="right">28.7</td>
+</tr>
+<tr class="even">
+<td align="left">(2011,2015]</td>
+<td align="left">SH</td>
+<td align="left">F</td>
+<td align="right">272</td>
+<td align="right">57</td>
+<td align="right">21.0</td>
+</tr>
+<tr class="odd">
+<td align="left">(2006,2011]</td>
+<td align="left">LS</td>
+<td align="left">M</td>
+<td align="right">1111</td>
+<td align="right">447</td>
+<td align="right">40.2</td>
+</tr>
+<tr class="even">
+<td align="left">(2006,2011]</td>
+<td align="left">LS</td>
+<td align="left">F</td>
+<td align="right">175</td>
+<td align="right">67</td>
+<td align="right">38.3</td>
+</tr>
+<tr class="odd">
+<td align="left">(2006,2011]</td>
+<td align="left">PE</td>
+<td align="left">M</td>
+<td align="right">1631</td>
+<td align="right">644</td>
+<td align="right">39.5</td>
+</tr>
+<tr class="even">
+<td align="left">(2006,2011]</td>
+<td align="left">PE</td>
+<td align="left">F</td>
+<td align="right">109</td>
+<td align="right">38</td>
+<td align="right">34.9</td>
+</tr>
+<tr class="odd">
+<td align="left">(2006,2011]</td>
+<td align="left">SH</td>
+<td align="left">M</td>
+<td align="right">450</td>
+<td align="right">101</td>
+<td align="right">22.4</td>
+</tr>
+<tr class="even">
+<td align="left">(2006,2011]</td>
+<td align="left">SH</td>
 <td align="left">F</td>
 <td align="right">101</td>
-<td align="right">45</td>
-<td align="right">44.6</td>
-</tr>
-<tr class="odd">
-<td align="left">Clinical Medicine</td>
-<td align="left">M</td>
-<td align="right">679</td>
-<td align="right">300</td>
-<td align="right">44.2</td>
-</tr>
-<tr class="even">
-<td align="left">Clinical Medicine</td>
-<td align="left">F</td>
-<td align="right">91</td>
-<td align="right">33</td>
-<td align="right">36.3</td>
-</tr>
-<tr class="odd">
-<td align="left">Earth Sciences</td>
-<td align="left">M</td>
-<td align="right">633</td>
-<td align="right">226</td>
-<td align="right">35.7</td>
-</tr>
-<tr class="even">
-<td align="left">Earth Sciences</td>
-<td align="left">F</td>
-<td align="right">70</td>
-<td align="right">19</td>
-<td align="right">27.1</td>
-</tr>
-<tr class="odd">
-<td align="left">Economics, law</td>
-<td align="left">M</td>
-<td align="right">478</td>
-<td align="right">141</td>
-<td align="right">29.5</td>
-</tr>
-<tr class="even">
-<td align="left">Economics, law</td>
-<td align="left">F</td>
-<td align="right">73</td>
-<td align="right">14</td>
-<td align="right">19.2</td>
-</tr>
-<tr class="odd">
-<td align="left">Engineering Sciences</td>
-<td align="left">M</td>
-<td align="right">1861</td>
-<td align="right">867</td>
-<td align="right">46.6</td>
-</tr>
-<tr class="even">
-<td align="left">Engineering Sciences</td>
-<td align="left">F</td>
-<td align="right">170</td>
-<td align="right">86</td>
-<td align="right">50.6</td>
-</tr>
-<tr class="odd">
-<td align="left">Environmental Sciences</td>
-<td align="left">M</td>
-<td align="right">644</td>
-<td align="right">233</td>
-<td align="right">36.2</td>
-</tr>
-<tr class="even">
-<td align="left">Environmental Sciences</td>
-<td align="left">F</td>
-<td align="right">92</td>
-<td align="right">38</td>
-<td align="right">41.3</td>
-</tr>
-<tr class="odd">
-<td align="left">Ethnology, social and human geography</td>
-<td align="left">M</td>
-<td align="right">112</td>
-<td align="right">36</td>
-<td align="right">32.1</td>
-</tr>
-<tr class="even">
-<td align="left">Ethnology, social and human geography</td>
-<td align="left">F</td>
-<td align="right">44</td>
-<td align="right">15</td>
-<td align="right">34.1</td>
-</tr>
-<tr class="odd">
-<td align="left">Experimental Medicine</td>
-<td align="left">M</td>
-<td align="right">620</td>
-<td align="right">330</td>
-<td align="right">53.2</td>
-</tr>
-<tr class="even">
-<td align="left">Experimental Medicine</td>
-<td align="left">F</td>
-<td align="right">160</td>
-<td align="right">91</td>
-<td align="right">56.9</td>
-</tr>
-<tr class="odd">
-<td align="left">General Biology</td>
-<td align="left">M</td>
-<td align="right">574</td>
-<td align="right">234</td>
-<td align="right">40.8</td>
-</tr>
-<tr class="even">
-<td align="left">General Biology</td>
-<td align="left">F</td>
-<td align="right">61</td>
-<td align="right">23</td>
-<td align="right">37.7</td>
-</tr>
-<tr class="odd">
-<td align="left">Linguistics and literature, philosophy</td>
-<td align="left">M</td>
-<td align="right">266</td>
-<td align="right">90</td>
-<td align="right">33.8</td>
-</tr>
-<tr class="even">
-<td align="left">Linguistics and literature, philosophy</td>
-<td align="left">F</td>
-<td align="right">104</td>
 <td align="right">26</td>
-<td align="right">25.0</td>
+<td align="right">25.7</td>
 </tr>
 <tr class="odd">
-<td align="left">Physics</td>
+<td align="left">(2002,2006]</td>
+<td align="left">LS</td>
 <td align="left">M</td>
-<td align="right">1462</td>
-<td align="right">765</td>
-<td align="right">52.3</td>
+<td align="right">661</td>
+<td align="right">243</td>
+<td align="right">36.8</td>
 </tr>
 <tr class="even">
-<td align="left">Physics</td>
+<td align="left">(2002,2006]</td>
+<td align="left">LS</td>
 <td align="left">F</td>
-<td align="right">74</td>
-<td align="right">40</td>
-<td align="right">54.1</td>
+<td align="right">111</td>
+<td align="right">43</td>
+<td align="right">38.7</td>
 </tr>
 <tr class="odd">
-<td align="left">Preventive Medicine (Epidemiology/Early Diagnosis/Prevention)</td>
+<td align="left">(2002,2006]</td>
+<td align="left">PE</td>
 <td align="left">M</td>
-<td align="right">176</td>
-<td align="right">79</td>
-<td align="right">44.9</td>
+<td align="right">503</td>
+<td align="right">186</td>
+<td align="right">37.0</td>
 </tr>
 <tr class="even">
-<td align="left">Preventive Medicine (Epidemiology/Early Diagnosis/Prevention)</td>
+<td align="left">(2002,2006]</td>
+<td align="left">PE</td>
 <td align="left">F</td>
-<td align="right">38</td>
-<td align="right">20</td>
-<td align="right">52.6</td>
+<td align="right">34</td>
+<td align="right">11</td>
+<td align="right">32.4</td>
 </tr>
 <tr class="odd">
-<td align="left">Psychology, educational studies</td>
+<td align="left">(2002,2006]</td>
+<td align="left">SH</td>
 <td align="left">M</td>
-<td align="right">401</td>
-<td align="right">100</td>
-<td align="right">24.9</td>
+<td align="right">168</td>
+<td align="right">33</td>
+<td align="right">19.6</td>
 </tr>
 <tr class="even">
-<td align="left">Psychology, educational studies</td>
+<td align="left">(2002,2006]</td>
+<td align="left">SH</td>
 <td align="left">F</td>
-<td align="right">145</td>
-<td align="right">36</td>
-<td align="right">24.8</td>
-</tr>
-<tr class="odd">
-<td align="left">Social Medicine</td>
-<td align="left">M</td>
-<td align="right">54</td>
-<td align="right">16</td>
-<td align="right">29.6</td>
-</tr>
-<tr class="even">
-<td align="left">Social Medicine</td>
-<td align="left">F</td>
-<td align="right">28</td>
-<td align="right">9</td>
-<td align="right">32.1</td>
-</tr>
-<tr class="odd">
-<td align="left">Sociology, social work, political sciences, media and communication studies, health</td>
-<td align="left">M</td>
-<td align="right">417</td>
-<td align="right">112</td>
-<td align="right">26.9</td>
-</tr>
-<tr class="even">
-<td align="left">Sociology, social work, political sciences, media and communication studies, health</td>
-<td align="left">F</td>
-<td align="right">132</td>
-<td align="right">32</td>
-<td align="right">24.2</td>
-</tr>
-<tr class="odd">
-<td align="left">Theology &amp; religious studies, history, classical studies, archaeology, prehistory and early history</td>
-<td align="left">M</td>
-<td align="right">226</td>
-<td align="right">47</td>
-<td align="right">20.8</td>
-</tr>
-<tr class="even">
-<td align="left">Theology &amp; religious studies, history, classical studies, archaeology, prehistory and early history</td>
-<td align="left">F</td>
-<td align="right">75</td>
-<td align="right">13</td>
-<td align="right">17.3</td>
+<td align="right">34</td>
+<td align="right">6</td>
+<td align="right">17.6</td>
 </tr>
 </tbody>
 </table>
 <p>Generalized linear models (with a logit link function for binary response data) can help checking the significance level of the observed differences:</p>
-<pre class="r"><code>model_gender &lt;- glm(is_positive ~ type, 
+<pre class="r"><code>model_gender &lt;- glm(is_positive ~ gender, 
                     dataset, family = &quot;binomial&quot;)
-model_gender_domain &lt;- glm(is_positive ~ type + domain, 
-                           dataset, family = &quot;binomial&quot;)
-model_gender_subdomain &lt;- glm(is_positive ~ type + subdomain, 
+model_year &lt;- glm(is_positive ~ start_year, 
+                    dataset, family = &quot;binomial&quot;)
+model_gender_year &lt;- glm(is_positive ~ gender + start_year, 
+                    dataset, family = &quot;binomial&quot;)
+model_gender_year_domain &lt;- glm(is_positive ~ gender + domain + start_year, 
                            dataset, family = &quot;binomial&quot;)
 
 tidy(model_gender) %&gt;% 
-  kable(caption = &quot;GLM for gender.&quot;)</code></pre>
+  kable(caption = &quot;GLM for gender of the grantee.&quot;)</code></pre>
 <p><!--
-<caption>--><span class="marginnote shownote">GLM for gender.</span><!--</caption>--></p>
+<caption>--><span class="marginnote shownote">GLM for gender of the grantee.</span><!--</caption>--></p>
 <table>
 <thead>
 <tr class="header">
@@ -880,24 +910,24 @@ tidy(model_gender) %&gt;%
 <tbody>
 <tr class="odd">
 <td align="left">(Intercept)</td>
-<td align="right">-0.2705655</td>
-<td align="right">0.0183091</td>
-<td align="right">-14.777613</td>
+<td align="right">-0.2615542</td>
+<td align="right">0.0184046</td>
+<td align="right">-14.21138</td>
 <td align="right">0.0000000</td>
 </tr>
 <tr class="even">
-<td align="left">typeF</td>
-<td align="right">-0.1699454</td>
-<td align="right">0.0500656</td>
-<td align="right">-3.394451</td>
-<td align="right">0.0006877</td>
+<td align="left">genderF</td>
+<td align="right">-0.1772545</td>
+<td align="right">0.0501151</td>
+<td align="right">-3.53695</td>
+<td align="right">0.0004048</td>
 </tr>
 </tbody>
 </table>
-<pre class="r"><code>tidy(model_gender_domain) %&gt;% 
-  kable(caption = &quot;GLM for gender and domain.&quot;)</code></pre>
+<pre class="r"><code>tidy(model_year) %&gt;% 
+  kable(caption = &quot;GLM for start year of the grant.&quot;)</code></pre>
 <p><!--
-<caption>--><span class="marginnote shownote">GLM for gender and domain.</span><!--</caption>--></p>
+<caption>--><span class="marginnote shownote">GLM for start year of the grant.</span><!--</caption>--></p>
 <table>
 <thead>
 <tr class="header">
@@ -911,38 +941,38 @@ tidy(model_gender) %&gt;%
 <tbody>
 <tr class="odd">
 <td align="left">(Intercept)</td>
-<td align="right">-0.1105025</td>
-<td align="right">0.0285365</td>
-<td align="right">-3.872329</td>
-<td align="right">0.0001078</td>
+<td align="right">0.0279413</td>
+<td align="right">0.0341229</td>
+<td align="right">0.8188428</td>
+<td align="right">0.4128761</td>
 </tr>
 <tr class="even">
-<td align="left">typeF</td>
-<td align="right">-0.0585190</td>
-<td align="right">0.0514973</td>
-<td align="right">-1.136351</td>
-<td align="right">0.2558099</td>
+<td align="left">start_year(2011,2015]</td>
+<td align="right">-0.2611385</td>
+<td align="right">0.0437332</td>
+<td align="right">-5.9711682</td>
+<td align="right">0.0000000</td>
 </tr>
 <tr class="odd">
-<td align="left">domainHumanities and Social Sciences</td>
-<td align="right">-0.8804632</td>
-<td align="right">0.0519398</td>
-<td align="right">-16.951604</td>
+<td align="left">start_year(2006,2011]</td>
+<td align="right">-0.5607458</td>
+<td align="right">0.0486198</td>
+<td align="right">-11.5332805</td>
 <td align="right">0.0000000</td>
 </tr>
 <tr class="even">
-<td align="left">domainMathematics, Natural- and Engineering Sciences</td>
-<td align="right">-0.0519289</td>
-<td align="right">0.0377476</td>
-<td align="right">-1.375688</td>
-<td align="right">0.1689183</td>
+<td align="left">start_year(2002,2006]</td>
+<td align="right">-0.6669680</td>
+<td align="right">0.0639625</td>
+<td align="right">-10.4274844</td>
+<td align="right">0.0000000</td>
 </tr>
 </tbody>
 </table>
-<pre class="r"><code>tidy(model_gender_subdomain) %&gt;% 
-  kable(caption = &quot;GLM for gender and subdomain.&quot;)</code></pre>
+<pre class="r"><code>tidy(model_gender_year) %&gt;% 
+  kable(caption = &quot;GLM for gender of the grantee and start year of the grant.&quot;)</code></pre>
 <p><!--
-<caption>--><span class="marginnote shownote">GLM for gender and subdomain.</span><!--</caption>--></p>
+<caption>--><span class="marginnote shownote">GLM for gender of the grantee and start year of the grant.</span><!--</caption>--></p>
 <table>
 <thead>
 <tr class="header">
@@ -956,150 +986,113 @@ tidy(model_gender) %&gt;%
 <tbody>
 <tr class="odd">
 <td align="left">(Intercept)</td>
-<td align="right">-0.9640704</td>
-<td align="right">0.1734343</td>
-<td align="right">-5.5587077</td>
+<td align="right">0.0715699</td>
+<td align="right">0.0354239</td>
+<td align="right">2.020388</td>
+<td align="right">0.0433432</td>
+</tr>
+<tr class="even">
+<td align="left">genderF</td>
+<td align="right">-0.2348357</td>
+<td align="right">0.0506782</td>
+<td align="right">-4.633862</td>
+<td align="right">0.0000036</td>
+</tr>
+<tr class="odd">
+<td align="left">start_year(2011,2015]</td>
+<td align="right">-0.2736773</td>
+<td align="right">0.0438631</td>
+<td align="right">-6.239353</td>
 <td align="right">0.0000000</td>
 </tr>
 <tr class="even">
-<td align="left">typeF</td>
-<td align="right">-0.0491377</td>
-<td align="right">0.0520639</td>
-<td align="right">-0.9437964</td>
-<td align="right">0.3452737</td>
-</tr>
-<tr class="odd">
-<td align="left">subdomainBasic Biological Research</td>
-<td align="right">0.8962029</td>
-<td align="right">0.1794699</td>
-<td align="right">4.9936099</td>
-<td align="right">0.0000006</td>
-</tr>
-<tr class="even">
-<td align="left">subdomainBasic Medical Sciences</td>
-<td align="right">0.8969412</td>
-<td align="right">0.1835181</td>
-<td align="right">4.8874820</td>
-<td align="right">0.0000010</td>
-</tr>
-<tr class="odd">
-<td align="left">subdomainChemistry</td>
-<td align="right">0.8744503</td>
-<td align="right">0.1833415</td>
-<td align="right">4.7695173</td>
-<td align="right">0.0000018</td>
-</tr>
-<tr class="even">
-<td align="left">subdomainClinical Medicine</td>
-<td align="right">0.6980691</td>
-<td align="right">0.1877850</td>
-<td align="right">3.7173842</td>
-<td align="right">0.0002013</td>
-</tr>
-<tr class="odd">
-<td align="left">subdomainEarth Sciences</td>
-<td align="right">0.3433189</td>
-<td align="right">0.1903929</td>
-<td align="right">1.8032128</td>
-<td align="right">0.0713548</td>
-</tr>
-<tr class="even">
-<td align="left">subdomainEconomics, law</td>
-<td align="right">0.0325303</td>
-<td align="right">0.1973368</td>
-<td align="right">0.1648468</td>
-<td align="right">0.8690646</td>
-</tr>
-<tr class="odd">
-<td align="left">subdomainEngineering Sciences</td>
-<td align="right">0.8449292</td>
-<td align="right">0.1788076</td>
-<td align="right">4.7253531</td>
-<td align="right">0.0000023</td>
-</tr>
-<tr class="even">
-<td align="left">subdomainEnvironmental Sciences</td>
-<td align="right">0.4302586</td>
-<td align="right">0.1892325</td>
-<td align="right">2.2737036</td>
-<td align="right">0.0229838</td>
-</tr>
-<tr class="odd">
-<td align="left">subdomainEthnology, social and human geography</td>
-<td align="right">0.2557098</td>
-<td align="right">0.2430637</td>
-<td align="right">1.0520280</td>
-<td align="right">0.2927867</td>
-</tr>
-<tr class="even">
-<td align="left">subdomainExperimental Medicine</td>
-<td align="right">1.1334751</td>
-<td align="right">0.1873527</td>
-<td align="right">6.0499543</td>
+<td align="left">start_year(2006,2011]</td>
+<td align="right">-0.5798493</td>
+<td align="right">0.0488458</td>
+<td align="right">-11.871019</td>
 <td align="right">0.0000000</td>
 </tr>
 <tr class="odd">
-<td align="left">subdomainGeneral Biology</td>
-<td align="right">0.5829520</td>
-<td align="right">0.1911103</td>
-<td align="right">3.0503440</td>
-<td align="right">0.0022858</td>
+<td align="left">start_year(2002,2006]</td>
+<td align="right">-0.6837244</td>
+<td align="right">0.0641222</td>
+<td align="right">-10.662826</td>
+<td align="right">0.0000000</td>
 </tr>
-<tr class="even">
-<td align="left">subdomainLinguistics and literature, philosophy</td>
-<td align="right">0.1940465</td>
-<td align="right">0.2061647</td>
-<td align="right">0.9412207</td>
-<td align="right">0.3465918</td>
+</tbody>
+</table>
+<pre class="r"><code>tidy(model_gender_year_domain) %&gt;% 
+  kable(caption = &quot;GLM for gender of the grantee and start year and domain of the grant.&quot;)</code></pre>
+<p><!--
+<caption>--><span class="marginnote shownote">GLM for gender of the grantee and start year and domain of the grant.</span><!--</caption>--></p>
+<table>
+<thead>
+<tr class="header">
+<th align="left">term</th>
+<th align="right">estimate</th>
+<th align="right">std.error</th>
+<th align="right">statistic</th>
+<th align="right">p.value</th>
 </tr>
+</thead>
+<tbody>
 <tr class="odd">
-<td align="left">subdomainPhysics</td>
-<td align="right">1.0628688</td>
-<td align="right">0.1806554</td>
-<td align="right">5.8834056</td>
+<td align="left">(Intercept)</td>
+<td align="right">0.2773068</td>
+<td align="right">0.0422339</td>
+<td align="right">6.565978</td>
 <td align="right">0.0000000</td>
 </tr>
 <tr class="even">
-<td align="left">subdomainPreventive Medicine (Epidemiology/Early Diagnosis/Prevention)</td>
-<td align="right">0.8229694</td>
-<td align="right">0.2207799</td>
-<td align="right">3.7275566</td>
-<td align="right">0.0001933</td>
+<td align="left">genderF</td>
+<td align="right">-0.1231801</td>
+<td align="right">0.0521501</td>
+<td align="right">-2.362030</td>
+<td align="right">0.0181752</td>
 </tr>
 <tr class="odd">
-<td align="left">subdomainPsychology, educational studies</td>
-<td align="right">-0.1265009</td>
-<td align="right">0.1993339</td>
-<td align="right">-0.6346178</td>
-<td align="right">0.5256777</td>
+<td align="left">domainPE</td>
+<td align="right">-0.0711986</td>
+<td align="right">0.0384672</td>
+<td align="right">-1.850891</td>
+<td align="right">0.0641852</td>
 </tr>
 <tr class="even">
-<td align="left">subdomainSocial Medicine</td>
-<td align="right">0.1565674</td>
-<td align="right">0.2958393</td>
-<td align="right">0.5292310</td>
-<td align="right">0.5966452</td>
+<td align="left">domainSH</td>
+<td align="right">-0.9409120</td>
+<td align="right">0.0528571</td>
+<td align="right">-17.801038</td>
+<td align="right">0.0000000</td>
 </tr>
 <tr class="odd">
-<td align="left">subdomainSociology, social work, political sciences, media and communication studies, health</td>
-<td align="right">-0.0582940</td>
-<td align="right">0.1983756</td>
-<td align="right">-0.2938565</td>
-<td align="right">0.7688675</td>
+<td align="left">start_year(2011,2015]</td>
+<td align="right">-0.2828457</td>
+<td align="right">0.0446153</td>
+<td align="right">-6.339658</td>
+<td align="right">0.0000000</td>
 </tr>
 <tr class="even">
-<td align="left">subdomainTheology &amp; religious studies, history, classical studies, archaeology, prehistory and early history</td>
-<td align="right">-0.4142741</td>
-<td align="right">0.2252920</td>
-<td align="right">-1.8388315</td>
-<td align="right">0.0659400</td>
+<td align="left">start_year(2006,2011]</td>
+<td align="right">-0.6353008</td>
+<td align="right">0.0496612</td>
+<td align="right">-12.792707</td>
+<td align="right">0.0000000</td>
+</tr>
+<tr class="odd">
+<td align="left">start_year(2002,2006]</td>
+<td align="right">-0.7690391</td>
+<td align="right">0.0650683</td>
+<td align="right">-11.818954</td>
+<td align="right">0.0000000</td>
 </tr>
 </tbody>
 </table>
 <p>Discussion</p>
 <ul>
 <li>As expected, positive terms are more commonly used in grant writing than in paper writing.</li>
-<li>Unlike in the <a href="https://www.bmj.com/content/367/bmj.l6573">BMJ 2019;367:l6573</a>, <em>gender</em> appears to play no role in the use of positive terms in SNSF grant applications. If we correct for factors such as <em>domain</em> or <em>subdomain</em>, then <em>gender</em> appears to shows no significant effect when fitting a generalized linear model with a logit link function.</li>
+<li>In the domain of social sciences and humanities, there is a significant positive terms are much less commonly used.</li>
+<li>With time, positive terms are being used more and more frequently.</li>
+<li>As in <a href="https://www.bmj.com/content/367/bmj.l6573">BMJ 2019;367:l6573</a>, <em>gender</em> appears to play a role in the use of positive terms in SNSF grant applications. If we account for <em>domain</em> and <em>start year</em> of the grant, then the effect of <em>gender</em> is not so significant.</li>
 </ul>
 </div>
 
