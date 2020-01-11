@@ -12,7 +12,7 @@ editor_options:
 
 [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573) reports that female researchers in Life Sciences use fewer positive terms to describe the importance of their research than their male counterparts.  
 
-Can one reproduce those observations for grants funded by the Swiss National Science Foundation (SNSF)?
+Below, we investigate whether those observations can be reproduced for grants funded by the Swiss National Science Foundation (SNSF), the leading public research funding organization in Switzerland.
 
 ## Analysis
 
@@ -68,7 +68,9 @@ grants <- grants %>%
     project_title_english,
     abstract,
     lay_summary_english,
-    discipline_name_hierarchy)
+    discipline_name_hierarchy,
+    discipline_name,
+    start_date)
 ```
 
 (As the SNSF accepts grants in several languages, we try to collect as many English abstracts and titles as possible.)  We also need to remove grants for which title and abstract are not available.
@@ -111,7 +113,7 @@ grants <- grants %>%
     c("domain", "subdomain"), ";", fill = "right")
 ```
 
-Finally, we count the use of stop-words for English, German, French, and Italian (heuristic for language detection), and keep the texts where English has the highest score:
+We count the use of stop-words for English, German, French, and Italian (heuristic for language detection), and keep the texts where English has the highest score:
 
 ```{r, eval=FALSE}
 
@@ -128,6 +130,16 @@ detect_language <- function(words, babel = c("en", "de", "fr", "it")) {
 grants <- grants %>% 
   mutate(lang = map_chr(text, detect_language)) %>%
   filter(lang == "en")
+```
+
+And we extract the year from the grant start date.
+
+```{r, eval=FALSE}
+grants <- grants %>% 
+  extract(start_date, "start_year", "([[:digit:]]{4}$)") %>%
+  mutate(
+    start_year = as.numeric(start_year),
+    start_year = cut(start_year, breaks = 5))
 ```
 
 As for the grantees, we are interested in *gender* and assume only applicants and responsible applicants actually write the grant.
@@ -151,32 +163,34 @@ df_mapp <- grantees %>%
   select(person_id, project_id = projects_as_responsible_applicant) %>%
   mutate(project_id = str_split(project_id, ";")) %>%
   unnest(project_id) %>%
-  semi_join(grants, by = c("project_id" = "project_number")) %>%
-  mutate(type = "main app")
+  semi_join(grants, by = c("project_id" = "project_number"))
 
 df_app <- grantees %>%
   select(person_id, project_id = projects_as_applicant) %>%
   mutate(project_id = str_split(project_id, ";")) %>%
   unnest(project_id) %>%
-  semi_join(grants, by = c("project_id" = "project_number")) %>%
-  mutate(type = "app")
+  semi_join(grants, by = c("project_id" = "project_number"))
 
 df_app <- df_app %>%
   bind_rows(df_mapp) %>%
+  distinct(person_id, project_id) %>%
   left_join(df_gender, by = "person_id")
 
 gender_proj <- df_app %>%
   group_by(project_id) %>%
-  summarise(share_female = round(sum(gender == "female") / n(), 1)) %>% 
-  ungroup()
+  summarise(
+    n_authors = n(),
+    share_women = sum(gender == "female") / n_authors) %>% 
+  ungroup() %>%
+  mutate(share_women = round(share_women, 1))
 
 grants <- grants %>%
   left_join(gender_proj, by = c("project_number" = "project_id")) %>%
   drop_na() %>%
   mutate(
-    type = "mixed",
-    type = ifelse(share_female == 0, "male", type),
-    type = ifelse(share_female == 1, "female", type))
+    gender = "mixed",
+    gender = ifelse(share_women == 0, "male", gender),
+    gender = ifelse(share_women == 1, "female", gender))
 
 ```
 
@@ -197,21 +211,34 @@ grants <- grants %>%
   mutate(is_positive = map_lgl(text, contains_any, terms = terms25))
 
 grants %>%
+  count(start_year, gender) %>%
+  kable()
+
+grants %>%
+  filter(start_year != "(1997,2002]") %>% # 2 women only
   mutate(
-    domain = factor(domain),
+    start_year = fct_drop(start_year),
+    start_year = fct_rev(start_year),
+    domain = factor(
+              domain, 
+              c("Biology and Medicine",
+                "Mathematics, Natural- and Engineering Sciences",
+                "Humanities and Social Sciences"),
+              c("LS", "PE", "SH")),
     subdomain = factor(subdomain),
-    type = factor(type, c("male", "female"), c("M", "F")),
+    gender = factor(gender, c("male", "female"), c("M", "F")),
     is_positive = factor(is_positive, c("FALSE", "TRUE"), c("N", "Y"))) %>%
-  select(is_positive, type, domain, subdomain, share_female) %>%
+  select(is_positive, gender, 
+         domain, subdomain, discipline_name, 
+         share_women, start_year) %>%
   write_rds(here("data", "clean_counts.Rds"))
 ```
 
-
-The we try to look for possible differences in counts by *gender*, *domain*, and *subdomain*. Below detailed shares (%):
+The we try to look for possible differences in counts by *gender*, *domain*, and *start year*. Below detailed shares (%):
 
 ```{r}
 dataset <- read_rds(here("data", "clean_counts.Rds")) %>%
-  filter(!is.na(type))
+  filter(!is.na(gender))
 
 get_positive_share <- function(grouped_df, side_note) {
   grouped_df %>%
@@ -227,40 +254,49 @@ dataset %>%
     get_positive_share(side_note = "Percentage of applications for which title and abstract contain at least one positive term by domain.")
 
 dataset %>%
-  group_by(type) %>%
+  group_by(gender) %>%
   get_positive_share(side_note = "Percentage of applications for which title and abstract contain at least one positive term by gender of the grantee.")
 
 dataset %>%
-  group_by(domain, type) %>%
-  get_positive_share(
-    side_note = "Percentage of applications for which title and abstract contain at least one positive term by domain and gender of the grantee.")
+  group_by(start_year, gender) %>%
+  get_positive_share(side_note = "Percentage of applications for which title and abstract contain at least one positive term by start year of the grant and by gender of the grantee.")
 
 dataset %>%
-  group_by(subdomain, type) %>%
+  group_by(domain, gender) %>%
   get_positive_share(
-    side_note = "Percentage of applications for which title and abstract contain at least one positive term by subdomain and gender of the grantee.")
+    side_note = "Percentage of applications for which title and abstract contain at least one positive term by domain of the grant and by gender of the grantee.")
 
+dataset %>%
+  group_by(start_year, domain, gender) %>%
+  get_positive_share(
+    side_note = "Percentage of applications for which title and abstract contain at least one positive term by start year and domain of the grant and by gender of the grantee.")
 ```
 
 Generalized linear models (with a logit link function for binary response data) can help checking the significance level of the observed differences:
 
 ```{r}
-model_gender <- glm(is_positive ~ type, 
+model_gender <- glm(is_positive ~ gender, 
                     dataset, family = "binomial")
-model_gender_domain <- glm(is_positive ~ type + domain, 
-                           dataset, family = "binomial")
-model_gender_subdomain <- glm(is_positive ~ type + subdomain, 
+model_year <- glm(is_positive ~ start_year, 
+                    dataset, family = "binomial")
+model_gender_year <- glm(is_positive ~ gender + start_year, 
+                    dataset, family = "binomial")
+model_gender_year_domain <- glm(is_positive ~ gender + domain + start_year, 
                            dataset, family = "binomial")
 
 tidy(model_gender) %>% 
-  kable(caption = "GLM for gender.")
-tidy(model_gender_domain) %>% 
-  kable(caption = "GLM for gender and domain.")
-tidy(model_gender_subdomain) %>% 
-  kable(caption = "GLM for gender and subdomain.")
+  kable(caption = "GLM for gender of the grantee.")
+tidy(model_year) %>% 
+  kable(caption = "GLM for start year of the grant.")
+tidy(model_gender_year) %>% 
+  kable(caption = "GLM for gender of the grantee and start year of the grant.")
+tidy(model_gender_year_domain) %>% 
+  kable(caption = "GLM for gender of the grantee and start year and domain of the grant.")
 ```
 
 Discussion  
 
 * As expected, positive terms are more commonly used in grant writing than in paper writing.
-* Unlike in the [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573), *gender* appears to play no role in the use of positive terms in SNSF grant applications.  If we correct for factors such as *domain* or *subdomain*, then *gender* appears to shows no significant effect when fitting a generalized linear model with a logit link function.
+* In the domain of social sciences and humanities, there is a significant positive terms are much less commonly used.
+* With time, positive terms are being used more and more frequently.
+* As in [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573), *gender* appears to play a role in the use of positive terms in SNSF grant applications.  If we account for *domain* and *start year* of the grant, then the effect of *gender* is not so significant.

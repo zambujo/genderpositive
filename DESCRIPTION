@@ -9,7 +9,7 @@ Authors@R:
            email = "first.last@example.com",
            comment = c(ORCID = "YOUR-ORCID-ID"))
 Description: A reply to BMJ 2019;367:l6573
-License: What license it uses
+License: CCBY-4.0
 Depends: 
     broom,
     janitor,
