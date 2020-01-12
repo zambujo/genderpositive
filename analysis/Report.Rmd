@@ -8,11 +8,20 @@ editor_options:
   chunk_output_type: console
 ---
 
-## Introduction
+## Background
 
 [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573) reports that female researchers in Life Sciences use fewer positive terms to describe the importance of their research than their male counterparts.  
 
 Below, we investigate whether those observations can be reproduced for grants funded by the Swiss National Science Foundation (SNSF), the leading public research funding organization in Switzerland.
+
+## Main observations  
+
+* As expected, positive terms are more commonly used in grant writing than in paper writing.
+* In the domain of Humanities and Social Sciences, significant positive terms are significantly less commonly used than in the domain of Mathematics, Natural- and Engineering Sciences, or in Biology and Medicine.
+* The use of positive terms appears to be more and more common in recent years.
+* In line with the main finding in [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573), *gender* appears to have an effect in the use of positive terms in English grant applications to the SNSF.  However, when accounting for *domain* and *start year* of the grant, the effect of *gender* appears to be much less significant.
+
+
 
 ## Analysis
 
@@ -294,9 +303,3 @@ tidy(model_gender_year_domain) %>%
   kable(caption = "GLM for gender of the grantee and start year and domain of the grant.")
 ```
 
-Discussion  
-
-* As expected, positive terms are more commonly used in grant writing than in paper writing.
-* In the domain of social sciences and humanities, there is a significant positive terms are much less commonly used.
-* With time, positive terms are being used more and more frequently.
-* As in [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573), *gender* appears to play a role in the use of positive terms in SNSF grant applications.  However, if we account for *domain* and *start year* of the grant, then the effect of *gender* appears to be much less significant.
