@@ -296,7 +296,7 @@ library(stopwords)
 library(knitr)
 knitr::opts_chunk$set(echo = TRUE)
 library(broom)</code></pre>
-<p>The SNSF provides public datasets with information regarding the research domain, the titles, and the abstracts of the grants it funds, as well as the gender of the responsible grantee.</p>
+<p>The SNSF provides public datasets with information regarding the research domain, the titles, and the abstracts of the grants it funds, as well as the gender of the grantees.</p>
 <p>To reproduce the analysis <a href="https://www.bmj.com/content/367/bmj.l6573">BMJ 2019;367:l6573</a>, we will download two datasets available on the SNSF’s grant portal at <a href="http://p3.snf.ch/Pages/DataAndDocumentation.aspx">p3.snf.ch</a>:</p>
 <pre class="r"><code>download.file(
   &quot;http://p3.snf.ch/P3Export/P3_GrantExport_with_abstracts.csv&quot;,

@@ -36,7 +36,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(broom)
 ```
 
-The SNSF provides public datasets with information regarding the research domain, the titles, and the abstracts of the grants it funds, as well as the gender of the responsible grantee.
+The SNSF provides public datasets with information regarding the research domain, the titles, and the abstracts of the grants it funds, as well as the gender of the grantees.
 
 To reproduce the analysis [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573), we will download two datasets available on the SNSF's grant portal at [p3.snf.ch](http://p3.snf.ch/Pages/DataAndDocumentation.aspx):
 
