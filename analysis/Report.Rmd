@@ -65,7 +65,7 @@ grantees <-
   clean_names()
 ```
 
-Let's cut the `grants` table to the few variables of interest: *title*, *abstract*, *domain*.
+Let's cut the `grants` table to the few variables of interest: *title*, *abstract*, *domain/discipline*, and *date*.
 
 ```{r, eval=FALSE}
 grants <- grants %>%
