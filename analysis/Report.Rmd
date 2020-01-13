@@ -18,7 +18,7 @@ Below, we investigate whether those observations can be reproduced for grants fu
 
 * In line with the main finding in [BMJ 2019;367:l6573][ref1], *gender* appears to have an effect in the use of positive terms in English grant applications to the SNSF.  However, when accounting for *domain* and *start year* of the grant, the effect of *gender* is less significant.
 * With time, the use of positive terms has increased considerably.
-* In the domain of *Humanities and Social Sciences* positive terms are significantly less commonly used than in the domain of *Mathematics, Natural- and Engineering Sciences* or in *Biology and Medicine*.
+* In the domain of *Humanities and Social Sciences* positive terms are less common than in the domain of *Mathematics, Natural- and Engineering Sciences* or in *Biology and Medicine*.
 * As expected, positive terms are more commonly used in grant writing than in paper writing.
 
 ## Analysis
