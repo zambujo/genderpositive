@@ -453,7 +453,7 @@ grants %&gt;%
          domain, subdomain, discipline_name, 
          share_women, start_year) %&gt;%
   write_rds(here(&quot;data&quot;, &quot;clean_counts.Rds&quot;))</code></pre>
-<p>The we try to look for possible differences in counts by <em>gender</em>, <em>domain</em>, and <em>start year</em>. Below detailed shares (%):</p>
+<p>And we try to look for possible differences in counts by <em>gender</em>, <em>domain</em>, and <em>start year</em>. Below detailed shares (%):</p>
 <pre class="r"><code>dataset &lt;- read_rds(here(&quot;data&quot;, &quot;clean_counts.Rds&quot;)) %&gt;%
   filter(!is.na(gender))</code></pre>
 <pre><code>## filter: removed 1,650 rows (11%), 13,943 rows remaining</code></pre>

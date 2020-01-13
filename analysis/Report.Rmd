@@ -21,8 +21,6 @@ Below, we investigate whether those observations can be reproduced for grants fu
 * The use of positive terms appears to be more and more common in recent years.
 * In line with the main finding in [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573), *gender* appears to have an effect in the use of positive terms in English grant applications to the SNSF.  However, when accounting for *domain* and *start year* of the grant, the effect of *gender* appears to be much less significant.
 
-
-
 ## Analysis
 
 For a statistical analysis `R`, we use the following packages for convenience:
@@ -243,7 +241,7 @@ grants %>%
   write_rds(here("data", "clean_counts.Rds"))
 ```
 
-The we try to look for possible differences in counts by *gender*, *domain*, and *start year*. Below detailed shares (%):
+And we try to look for possible differences in counts by *gender*, *domain*, and *start year*. Below detailed shares (%):
 
 ```{r}
 dataset <- read_rds(here("data", "clean_counts.Rds")) %>%
