@@ -10,13 +10,13 @@ editor_options:
 
 ## Background
 
-[BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573) reports that female researchers in Life Sciences use fewer positive terms to describe the importance of their research than their male counterparts.  
+[BMJ 2019;367:l6573][ref1] reports that female researchers in Life Sciences use fewer positive terms to describe the importance of their research than their male counterparts.  
 
 Below, we investigate whether those observations can be reproduced for grants funded by the Swiss National Science Foundation (SNSF), the leading public research funding organization in Switzerland.
 
 ## Main observations  
 
-* In line with the main finding in [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573), *gender* appears to have an effect in the use of positive terms in English grant applications to the SNSF.  However, when accounting for *domain* and *start year* of the grant, the effect of *gender* is less significant.
+* In line with the main finding in [BMJ 2019;367:l6573][ref1], *gender* appears to have an effect in the use of positive terms in English grant applications to the SNSF.  However, when accounting for *domain* and *start year* of the grant, the effect of *gender* is less significant.
 * With time, the use of positive terms has increased considerably.
 * In the domain of *Humanities and Social Sciences*, significant positive terms are significantly less commonly used than in the domain of *Mathematics, Natural- and Engineering Sciences*, or in *Biology and Medicine*.
 * As expected, positive terms are more commonly used in grant writing than in paper writing.
@@ -38,7 +38,7 @@ library(broom)
 
 The SNSF provides public datasets with information regarding the research domain, the titles, and the abstracts of the grants it funds, as well as the gender of the grantees.
 
-To reproduce the analysis [BMJ 2019;367:l6573](https://www.bmj.com/content/367/bmj.l6573), we will download two datasets available on the SNSF's grant portal at [p3.snf.ch](http://p3.snf.ch/Pages/DataAndDocumentation.aspx):
+To reproduce the analysis in [BMJ 2019;367:l6573][ref1], we will download two datasets available on the SNSF's grant portal at [p3.snf.ch](http://p3.snf.ch/Pages/DataAndDocumentation.aspx):
 
 ```{r, eval=FALSE}
 
@@ -301,3 +301,5 @@ tidy(model_gender_year_domain) %>%
   kable(caption = "GLM for gender of the grantee and start year and domain of the grant.")
 ```
 
+
+[ref1]: https://www.bmj.com/content/367/bmj.l6573
